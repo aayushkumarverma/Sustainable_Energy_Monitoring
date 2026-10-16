@@ -11,6 +11,27 @@ from datetime import datetime, timezone
 import plotly.graph_objects as go
 import streamlit as st
 
+
+st.markdown("""
+<style>
+/* Make the Streamlit top header dark */
+[data-testid="stHeader"] {
+    background-color: #0b1220;
+}
+
+/* Match the main dashboard background */
+[data-testid="stAppViewContainer"] {
+    background-color: #0b1220;
+}
+
+/* Remove extra top spacing above the dashboard */
+.block-container {
+    padding-top: 1rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 from main import run_simulation
 
 
@@ -42,16 +63,24 @@ st.markdown(
     border-right: 1px solid #233248;
   }
   [data-testid="stSidebar"] .stMarkdown { color: #E8EFF8; }
-  .block-container { padding-top: 1.4rem; padding-bottom: 2.6rem; max-width: 1530px; }
-  h1, h2, h3 { letter-spacing: -0.025em; }
-  h3 { color: #E8EFF8 !important; }
-  [data-testid="stMetric"] {
-    background: linear-gradient(130deg, #15233A, #101B2D);
-    border: 1px solid #283951;
-    border-radius: 14px;
-    padding: 17px 19px;
-    min-height: 120px;
+  
+  /* Give the dashboard enough space at the top */
+  .block-container {
+      padding-top: 2.5rem !important;
+      padding-bottom: 1rem;
   }
+
+  /* Keep the Streamlit header from covering content */
+  [data-testid="stHeader"] {
+      background-color: #0b1220;
+      height: 0rem;
+  }
+
+  /* Prevent the main content from shifting upward */
+  [data-testid="stAppViewContainer"] .main .block-container {
+      margin-top: 0.5rem;
+  }
+
   [data-testid="stMetricLabel"] { color: #A1B1C7; }
   [data-testid="stMetricValue"] { color: #EFF7FF; font-weight: 750; }
   [data-testid="stMetricDelta"] { color: #32D7B3; }

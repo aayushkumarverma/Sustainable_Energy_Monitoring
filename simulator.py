@@ -1,77 +1,138 @@
+"""Synthetic machine telemetry and thermal-hotspot simulator for EcoTwin AI.
 
+This is a demonstration simulator, not a connection to physical equipment.
+It preserves Member 2's MachineSimulator API and adds the generate_telemetry()
+function expected by Member 1's main.py.
+"""
+from datetime import datetime
+import random
 import numpy as np
 
-HOTSPOT_THRESHOLD_C = 82.0
 
+class MachineSimulator:
+    def __init__(self, machine_id="Machine-01", machine_type="Chiller",
+                 grid_size=8, anomaly_threshold=82.0):
+        self.machine_id = machine_id
+        self.machine_type = machine_type
+        self.grid_size = int(grid_size)
+        self.anomaly_threshold = float(anomaly_threshold)
+        self.profiles = {
+            "Chiller": {"base_power": 45.0, "base_temp": 68.0, "max_temp": 90.0},
+            "Furnace": {"base_power": 90.0, "base_temp": 82.0, "max_temp": 110.0},
+            "Compressor": {"base_power": 30.0, "base_temp": 55.0, "max_temp": 75.0},
+        }
+        self.config = self.profiles.get(machine_type, self.profiles["Chiller"])
+        self.history = []
+        self.max_history_length = 20
 
-def analyze_thermal_feed(thermal_matrix):
-    """Detect thermal anomalies in a simulated camera image."""
+    def step(self, scenario="normal"):
+        """Generate one synthetic reading and append it to the rolling history."""
+        scenario = str(scenario).lower()
+        if scenario not in {"normal", "overheating"}:
+            raise ValueError("scenario must be 'normal' or 'overheating'")
 
-    pixels = np.asarray(thermal_matrix, dtype=float)
+        if scenario == "overheating":
+            status = "Warning"
+            power_kw = round(self.config["base_power"] * random.uniform(1.2, 1.4), 2)
+            temperature_c = round(max(self.config["base_temp"] * 1.2, 88.0), 2)
+        else:
+            status = random.choices(
+                ["Running", "Idle", "Warning"], weights=[0.80, 0.15, 0.05]
+            )[0]
+            if status == "Running":
+                power_kw = round(self.config["base_power"] * random.uniform(0.9, 1.1), 2)
+                temperature_c = round(self.config["base_temp"] * random.uniform(0.95, 1.05), 2)
+            elif status == "Warning":
+                power_kw = round(self.config["base_power"] * random.uniform(1.2, 1.4), 2)
+                temperature_c = round(self.config["base_temp"] * random.uniform(1.15, 1.3), 2)
+            else:
+                power_kw = round(self.config["base_power"] * 0.1, 2)
+                temperature_c = round(self.config["base_temp"] * 0.6, 2)
 
-    max_temp = float(pixels.max())
+        # One snapshot represents an illustrative 8-hour operating window.
+        # Change this if your team defines a different measurement interval.
+        runtime_hours = 8.0
+        heatmap = self._generate_thermal_heatmap(temperature_c, force_hotspot=(scenario == "overheating"))
+        anomaly_data = self._detect_thermal_anomalies(heatmap)
 
-    hot_pixels = int(
-        np.count_nonzero(pixels > HOTSPOT_THRESHOLD_C)
-    )
+        record = {
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "machine_id": self.machine_id,
+            "machine_type": self.machine_type,
+            "status": status,
+            "power_kw": float(power_kw),
+            "runtime_hours": float(runtime_hours),
+            "temperature_c": float(temperature_c),
+            "thermal_heatmap": heatmap.tolist(),
+            # Canonical field expected by main.py:
+            "cv_anomaly": bool(anomaly_data["anomaly_detected"]),
+            "cv_confidence": float(anomaly_data["cv_confidence"]),
+            # Member 2's original names are preserved for compatibility:
+            "anomaly_detected": bool(anomaly_data["anomaly_detected"]),
+            "hotspot_count": int(anomaly_data["hotspot_count"]),
+            "hotspot_zones": anomaly_data["hotspot_zones"],
+            "bounding_boxes": anomaly_data["bounding_boxes"],
+            "anomaly_threshold_c": self.anomaly_threshold,
+        }
 
-    anomaly = hot_pixels >= 2
+        self.history.append(record)
+        if len(self.history) > self.max_history_length:
+            self.history.pop(0)
+        return record
 
-    # Heuristic detection score, not ML confidence
-    if anomaly:
-        score = min(0.99, 0.75 + 0.025 * hot_pixels)
-    else:
-        score = min(
-            0.99,
-            0.80 + max(0, HOTSPOT_THRESHOLD_C - max_temp) / 100
+    def get_history(self):
+        return list(self.history)
+
+    def _generate_thermal_heatmap(self, base_temp, force_hotspot=False):
+        heatmap = np.random.normal(
+            loc=float(base_temp) - 4.0, scale=2.0,
+            size=(self.grid_size, self.grid_size)
         )
+        if force_hotspot or base_temp > 75.0 or random.random() < 0.4:
+            hx = random.randint(1, max(1, self.grid_size - 3))
+            hy = random.randint(1, max(1, self.grid_size - 3))
+            heatmap[hx:hx+2, hy:hy+2] += random.uniform(12.0, 22.0)
+        return np.clip(heatmap, 20.0, 120.0)
 
-    return round(max_temp, 2), anomaly, round(score, 2)
-
-
-def generate_telemetry(scenario="normal", seed=None):
-    """Generate machine telemetry and simulated thermal data."""
-
-    if scenario not in ("normal", "overheating"):
-        raise ValueError("Invalid scenario")
-
-    rng = np.random.default_rng(seed)
-
-    # Generate normal thermal image
-    heatmap = rng.normal(
-        loc=59 if scenario == "normal" else 66,
-        scale=3.0,
-        size=(8, 8)
-    )
-
-    # Add a hotspot for the overheating scenario
-    if scenario == "overheating":
-        heatmap[2:5, 3:6] = rng.normal(
-            loc=90,
-            scale=2,
-            size=(3, 3)
-        )
-
-    # Run simulated thermal inspection
-    max_temp, anomaly, score = analyze_thermal_feed(heatmap)
-
-    # Generate machine power consumption
-    power_kw = round(float(rng.uniform(5.0, 8.0)), 2)
-
-    # Generate machine operating hours
-    runtime_hours = round(float(rng.uniform(6.0, 12.0)), 2)
-
-    return {
-        "machine_id": "IND-HVAC-01",
-        "power_kw": power_kw,
-        "runtime_hours": runtime_hours,
-        "temperature_c": max_temp,
-        "status": "warning" if anomaly else "normal",
-        "cv_anomaly": anomaly,
-        "cv_confidence": score,
-        "thermal_heatmap": np.round(heatmap, 2).tolist()
-    }
+    def _detect_thermal_anomalies(self, heatmap):
+        grid = np.asarray(heatmap, dtype=float)
+        indices = np.argwhere(grid > self.anomaly_threshold)
+        zones, boxes = [], []
+        for r, c in indices:
+            vertical = "Top" if r < self.grid_size / 3 else (
+                "Bottom" if r >= 2 * self.grid_size / 3 else "Center"
+            )
+            horizontal = "Left" if c < self.grid_size / 3 else (
+                "Right" if c >= 2 * self.grid_size / 3 else "Center"
+            )
+            zone = f"{vertical}-{horizontal}"
+            if zone not in zones:
+                zones.append(zone)
+            boxes.append([
+                max(0, int(r) - 1), max(0, int(c) - 1),
+                min(self.grid_size, int(r) + 2), min(self.grid_size, int(c) + 2)
+            ])
+        count = int(len(indices))
+        return {
+            "anomaly_detected": count > 0,
+            "hotspot_count": count,
+            "hotspot_zones": zones,
+            "bounding_boxes": boxes,
+            # A heuristic indicator, not trained-model accuracy.
+            "cv_confidence": min(1.0, count / max(1, self.grid_size)),
+        }
 
 
-if __name__ == "__main__":
-    print(generate_telemetry(scenario="normal", seed=42))
+def generate_telemetry(scenario="normal", seed=None, machine_id="Unit-01",
+                       machine_type="Chiller"):
+    """Compatibility wrapper used by Member 1's main.py."""
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+    simulator = MachineSimulator(machine_id=machine_id, machine_type=machine_type)
+    return simulator.step(scenario=scenario)
+
+
+def generate_machine_telemetry(machine_id="Machine-01"):
+    """Backward-compatible helper retained from Member 2's original file."""
+    return generate_telemetry(machine_id=machine_id)
